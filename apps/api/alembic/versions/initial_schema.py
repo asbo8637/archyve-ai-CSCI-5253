@@ -1,10 +1,3 @@
-"""Initial Neon-first core schema.
-
-Revision ID: 20260327_0001
-Revises:
-Create Date: 2026-03-27 17:00:00
-"""
-
 from collections.abc import Sequence
 
 import sqlalchemy as sa

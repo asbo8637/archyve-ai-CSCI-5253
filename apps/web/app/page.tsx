@@ -1,7 +1,13 @@
-﻿import { DocumentDashboard } from "@/components/document-dashboard";
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+import { DocumentDashboard } from "@/components/document-dashboard";
+import { getWebRuntimeConfig } from "@/lib/runtime-config";
 
 export default function HomePage() {
-  return <DocumentDashboard apiBaseUrl={API_BASE_URL} />;
+  const config = getWebRuntimeConfig();
+
+  return (
+    <DocumentDashboard
+      apiBaseUrl={config.apiBaseUrl}
+      authConfigured={config.authConfigured}
+    />
+  );
 }

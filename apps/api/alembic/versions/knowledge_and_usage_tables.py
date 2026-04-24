@@ -1,10 +1,3 @@
-"""Knowledge, citation, usage, and email tables.
-
-Revision ID: 20260328_0002
-Revises: 20260327_0001
-Create Date: 2026-03-28 12:00:00
-"""
-
 from collections.abc import Sequence
 
 import sqlalchemy as sa
