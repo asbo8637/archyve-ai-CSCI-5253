@@ -1,4 +1,4 @@
-import { DocumentDashboard } from "@/components/document-dashboard";
+﻿import { DocumentDashboard } from "@/components/document-dashboard";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
