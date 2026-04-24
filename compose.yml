@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: archyve-api
+    env_file:
+      - .env
+    environment:
+      STORAGE_ROOT: /workspace/local-data/storage
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./local-data:/workspace/local-data
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    container_name: archyve-worker
+    env_file:
+      - .env
+    environment:
+      STORAGE_ROOT: /workspace/local-data/storage
+      WORKER_POLL_INTERVAL_SECONDS: 3
+      WORKER_BATCH_SIZE: 2
+      WORKER_NAME: compose-worker
+    volumes:
+      - ./local-data:/workspace/local-data
