@@ -1,8 +1,4 @@
-﻿import type { NextConfig } from "next";
-import { loadEnvConfig } from "@next/env";
-import path from "node:path";
-
-loadEnvConfig(path.resolve(process.cwd(), "../.."), true, console, true);
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   eslint: {
@@ -11,4 +7,3 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
-
