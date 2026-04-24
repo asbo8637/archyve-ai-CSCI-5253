@@ -1,21 +1,26 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import logging
 import time
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from archyve_common.db import SessionLocal
+from archyve_common.indexing import chunk_text, estimate_token_count, extract_text_from_path
 from archyve_common.models import (
     Document,
+    DocumentChunk,
     DocumentStatus,
     Job,
     JobStatus,
     JobType,
 )
 from archyve_common.settings import get_settings
+
+from worker_app.integrations.storage import get_document_storage_resolver
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,8 +73,59 @@ def claim_next_job() -> UUID | None:
 
 
 def process_job(job_id: UUID) -> None:
-    # Processing not yet implemented — job has been claimed and logged.
-    logger.info("Job %s claimed, processing not yet implemented", job_id)
+    with SessionLocal.begin() as session:
+        job = session.get(Job, job_id)
+        if job is None:
+            return
+
+        document_id = load_document_id(job)
+        document = session.get(Document, document_id) if document_id is not None else None
+
+        if document is None:
+            job.status = JobStatus.FAILED
+            job.last_error = "Document metadata was missing."
+            job.completed_at = datetime.now(UTC)
+            if document is not None:
+                document.status = DocumentStatus.FAILED
+                document.failure_reason = job.last_error
+            return
+
+        try:
+            with get_document_storage_resolver(document).materialize(document) as local_path:
+                text = extract_text_from_path(Path(local_path))
+            chunks = chunk_text(text)
+
+            session.execute(
+                delete(DocumentChunk).where(
+                    DocumentChunk.document_id == document.id
+                )
+            )
+
+            for index, chunk in enumerate(chunks):
+                session.add(
+                    DocumentChunk(
+                        document_id=document.id,
+                        company_id=document.company_id,
+                        chunk_index=index,
+                        content=chunk,
+                        token_count=estimate_token_count(chunk),
+                        chunk_metadata={"source_path": document.storage_path},
+                    )
+                )
+
+            document.status = DocumentStatus.READY
+            document.failure_reason = None
+            job.status = JobStatus.COMPLETED
+            job.last_error = None
+            job.completed_at = datetime.now(UTC)
+            logger.info("Indexed document %s into %s chunks", document.id, len(chunks))
+        except Exception as exc:  # pragma: no cover - defensive operational path
+            job.status = JobStatus.FAILED
+            job.last_error = str(exc)
+            job.completed_at = datetime.now(UTC)
+            document.status = DocumentStatus.FAILED
+            document.failure_reason = str(exc)
+            logger.exception("Failed to index document %s", document.id)
 
 
 def run_once() -> bool:
