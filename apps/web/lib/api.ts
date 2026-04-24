@@ -158,4 +158,3 @@ function buildApiError(status: number, body: ApiErrorResponse | null): ApiError 
 
   return new ApiError("The request failed.", status);
 }
-

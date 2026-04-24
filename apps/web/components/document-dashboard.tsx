@@ -1,41 +1,54 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { ApiError, getDocuments, uploadDocument } from "@/lib/api";
 import {
   getDocumentStatusLabel,
-  MOCK_DOCUMENTS,
   SUPPORTED_DOCUMENT_ACCEPT,
   type DocumentRecord
 } from "@/lib/documents";
 
-export function DocumentDashboard() {
-  const [documents, setDocuments] = useState<DocumentRecord[]>(MOCK_DOCUMENTS);
+export function DocumentDashboard({ apiBaseUrl }: { apiBaseUrl: string }) {
+  const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleUpload(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => {
+    void load();
+    const interval = window.setInterval(() => void load(), 3000);
+    return () => window.clearInterval(interval);
+  }, [apiBaseUrl]);
+
+  async function load() {
+    try {
+      setDocuments(await getDocuments(apiBaseUrl));
+    } catch {
+      // silently skip on poll errors
+    }
+  }
+
+  async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedFile) return;
 
     setUploading(true);
     setMessage(null);
+    setError(null);
 
-    setTimeout(() => {
-      const newDoc: DocumentRecord = {
-        id: String(Date.now()),
-        filename: selectedFile.name,
-        status: "processing",
-        failure_reason: null,
-        updated_at: new Date().toISOString()
-      };
-      setDocuments((current) => [newDoc, ...current]);
-      setMessage(`${selectedFile.name} was queued for processing.`);
+    try {
+      const created = await uploadDocument(apiBaseUrl, selectedFile);
+      setDocuments((current) => [created, ...current]);
+      setMessage(`${created.filename} was uploaded and queued for processing.`);
       setSelectedFile(null);
-      setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
-    }, 600);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Upload failed.");
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -43,10 +56,7 @@ export function DocumentDashboard() {
       <section className="hero">
         <span className="eyebrow">Document Ingestion</span>
         <h1>Upload and index your documents.</h1>
-        <p>
-          Upload files to Archyve AI. Supported formats: txt, md, pdf, docx,
-          csv, json.
-        </p>
+        <p>Files are saved locally and queued for processing.</p>
       </section>
 
       <section className="dashboard">
@@ -60,7 +70,7 @@ export function DocumentDashboard() {
               accept={SUPPORTED_DOCUMENT_ACCEPT}
               onChange={(e) => {
                 setSelectedFile(e.target.files?.[0] ?? null);
-                setMessage(null);
+                setError(null);
               }}
             />
             <button className="button" disabled={!selectedFile || uploading}>
@@ -68,6 +78,7 @@ export function DocumentDashboard() {
             </button>
           </form>
           {message ? <div className="callout">{message}</div> : null}
+          {error ? <p className="meta error">{error}</p> : null}
         </div>
 
         <div className="panel">

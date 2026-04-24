@@ -12,6 +12,9 @@ from api_app.api.router import api_router
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings = get_settings()
+    if not settings.r2_configured:
+        settings.storage_root_path.mkdir(parents=True, exist_ok=True)
     # Verify the database connection on startup.
     with engine.connect() as conn:
         conn.execute(text("SELECT 1"))
