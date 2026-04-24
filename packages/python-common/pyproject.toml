@@ -1,4 +1,4 @@
-﻿[build-system]
+[build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
@@ -10,5 +10,4 @@ requires-python = ">=3.11"
 
 [tool.setuptools.packages.find]
 include = ["archyve_common*"]
-
 

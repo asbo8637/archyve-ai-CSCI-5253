@@ -1,8 +1,10 @@
-﻿from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
+from archyve_common.db import engine
 from archyve_common.settings import get_settings
 
 from api_app.api.router import api_router
@@ -13,6 +15,9 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     if not settings.r2_configured:
         settings.storage_root_path.mkdir(parents=True, exist_ok=True)
+    # Verify the database connection on startup.
+    with engine.connect() as conn:
+        conn.execute(text("SELECT 1"))
     yield
 
 
