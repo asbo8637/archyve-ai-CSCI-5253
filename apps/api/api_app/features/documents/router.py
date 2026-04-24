@@ -12,7 +12,8 @@ from api_app.features.documents.service import (
     create_document_from_upload,
     list_documents_for_company,
 )
-from api_app.integrations.auth import AuthenticatedPrincipal, get_dev_principal
+from api_app.features.auth.service import get_current_principal
+from api_app.integrations.auth import AuthenticatedPrincipal
 
 router = APIRouter()
 
@@ -20,7 +21,7 @@ router = APIRouter()
 @router.get("/documents", response_model=list[DocumentRead])
 def list_documents(
     session: Session = Depends(get_session),
-    principal: AuthenticatedPrincipal = Depends(get_dev_principal),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
 ) -> list[Document]:
     return list_documents_for_company(session, company_id=principal.company_id)
 
@@ -29,14 +30,17 @@ def list_documents(
 async def upload_document(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
-    principal: AuthenticatedPrincipal = Depends(get_dev_principal),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
 ) -> Document:
     if not file.filename:
         raise HTTPException(status_code=400, detail="A filename is required.")
 
     suffix = Path(file.filename).suffix.lower()
     if suffix not in SUPPORTED_DOCUMENT_SUFFIXES:
-        raise HTTPException(status_code=400, detail="Unsupported file type.")
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported file type for the local bootstrap flow.",
+        )
 
     return await create_document_from_upload(
         session,
