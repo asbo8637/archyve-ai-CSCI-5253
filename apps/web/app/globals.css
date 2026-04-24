@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   color-scheme: light;
   --bg: #f5efe4;
   --panel: rgba(255, 251, 245, 0.9);
@@ -58,6 +58,13 @@ textarea {
   box-shadow: 0 16px 40px rgba(31, 26, 20, 0.08);
 }
 
+.hero-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
 .eyebrow {
   text-transform: uppercase;
   letter-spacing: 0.12em;
@@ -79,6 +86,20 @@ textarea {
   color: var(--muted);
   font-size: 1rem;
   line-height: 1.6;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.hero-button-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
 }
 
 .dashboard {
@@ -120,6 +141,16 @@ textarea {
   width: 100%;
 }
 
+.uploader input[type="text"],
+.company-select {
+  width: 100%;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(56, 47, 34, 0.12);
+  padding: 0.8rem 0.95rem;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text);
+}
+
 .button {
   border: none;
   border-radius: 999px;
@@ -129,6 +160,12 @@ textarea {
   font-weight: 700;
   cursor: pointer;
   justify-self: start;
+}
+
+.button-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid rgba(23, 76, 79, 0.2);
 }
 
 .button:disabled {
@@ -171,6 +208,8 @@ textarea {
   font-weight: 700;
 }
 
+.badge-pending_upload,
+.badge-uploaded,
 .badge-processing {
   color: var(--warning);
   background: rgba(140, 74, 31, 0.12);
@@ -194,12 +233,18 @@ textarea {
   color: var(--text);
 }
 
+.notice {
+  margin-top: 1.5rem;
+}
+
 .error {
   color: var(--error);
 }
 
 @media (max-width: 720px) {
-  .doc-row {
+  .hero-row,
+  .doc-row,
+  .hero-actions {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -211,3 +256,4 @@ textarea {
     align-items: start;
   }
 }
+

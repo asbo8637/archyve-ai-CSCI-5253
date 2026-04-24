@@ -1,0 +1,13 @@
+﻿alembic==1.16.5
+boto3==1.40.31
+fastapi==0.116.1
+pgvector==0.4.1
+psycopg[binary]==3.2.10
+PyJWT[crypto]==2.10.1
+pydantic-settings==2.10.1
+python-docx==1.2.0
+python-multipart==0.0.20
+pypdf==6.0.0
+sqlalchemy==2.0.43
+uvicorn[standard]==0.35.0
+
