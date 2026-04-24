@@ -46,8 +46,14 @@ async def create_document_from_upload(
         file=file,
     )
     document.storage_path = stored_asset.storage_path
+    document.r2_bucket = stored_asset.bucket_name
+    document.r2_key = stored_asset.object_key
 
-    job, message = build_process_document_job(company_id=company_id, document=document)
+    job, message = build_process_document_job(
+        company_id=company_id,
+        document=document,
+    )
+
     session.add_all([document, job])
     session.commit()
     session.refresh(document)
