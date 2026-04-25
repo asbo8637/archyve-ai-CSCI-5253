@@ -13,12 +13,15 @@ import {
 
 import {
   ApiError,
+  askQuestion,
   createCompany,
   getAuthSession,
   getDocuments,
+  reindexDocument,
   selectCompany,
   uploadDocument,
   type AccessTokenGetter,
+  type AskResponse,
   type AuthSession
 } from "@/lib/api";
 import {
@@ -80,6 +83,13 @@ function AuthenticatedDocumentDashboard({
     "idle" | "creating-company" | "switching-company" | "uploading"
   >("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [chatQuestion, setChatQuestion] = useState("");
+  const [chatResult, setChatResult] = useState<AskResponse | null>(null);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
+
+  const [reindexingId, setReindexingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isAuthenticated) {
@@ -173,6 +183,48 @@ function AuthenticatedDocumentDashboard({
       setError(toDisplayMessage(createError, "Unable to create company."));
     } finally {
       setSubmitState("idle");
+    }
+  }
+
+  async function handleReindex(documentId: string) {
+    setReindexingId(documentId);
+    setError(null);
+
+    try {
+      const updated = await reindexDocument(
+        apiBaseUrl,
+        createAccessTokenGetter(getAccessTokenSilently),
+        documentId
+      );
+      setDocuments((current: DocumentRecord[]) =>
+        current.map((doc: DocumentRecord) => (doc.id === updated.id ? updated : doc))
+      );
+    } catch (reindexError) {
+      setError(toDisplayMessage(reindexError, "Reindex failed."));
+    } finally {
+      setReindexingId(null);
+    }
+  }
+
+  async function handleChat(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!chatQuestion.trim()) return;
+
+    setChatLoading(true);
+    setChatResult(null);
+    setChatError(null);
+
+    try {
+      const result = await askQuestion(
+        apiBaseUrl,
+        createAccessTokenGetter(getAccessTokenSilently),
+        chatQuestion
+      );
+      setChatResult(result);
+    } catch (chatErr) {
+      setChatError(toDisplayMessage(chatErr, "Chat request failed."));
+    } finally {
+      setChatLoading(false);
     }
   }
 
@@ -401,9 +453,19 @@ function AuthenticatedDocumentDashboard({
                   <div className="doc-card" key={document.id}>
                     <div className="doc-row">
                       <span className="doc-name">{document.filename}</span>
-                      <span className={`badge badge-${document.status}`}>
-                        {getDocumentStatusLabel(document.status)}
-                      </span>
+                      <div className="doc-row">
+                        <span className={`badge badge-${document.status}`}>
+                          {getDocumentStatusLabel(document.status)}
+                        </span>
+                        <button
+                          className="button button-secondary"
+                          disabled={reindexingId === document.id}
+                          onClick={() => void handleReindex(document.id)}
+                          type="button"
+                        >
+                          {reindexingId === document.id ? "Queuing..." : "Reindex"}
+                        </button>
+                      </div>
                     </div>
                     <span className="meta">
                       Updated {new Date(document.updated_at).toLocaleString()}
@@ -415,6 +477,41 @@ function AuthenticatedDocumentDashboard({
                 ))
               )}
             </div>
+          </div>
+
+          <div className="panel stack">
+            <div>
+              <h3>Ask a Question</h3>
+              <p className="meta">
+                Search across your indexed documents using Gemini.
+              </p>
+            </div>
+            <form className="uploader" onSubmit={handleChat}>
+              <input
+                onChange={(event: ChangeEvent<HTMLInputElement>) => setChatQuestion(event.target.value)}
+                placeholder="Ask something about your documents..."
+                type="text"
+                value={chatQuestion}
+              />
+              <button className="button" disabled={chatLoading}>
+                {chatLoading ? "Asking..." : "Ask"}
+              </button>
+            </form>
+            {chatError ? (
+              <p className="meta error" role="alert">
+                {chatError}
+              </p>
+            ) : null}
+            {chatResult ? (
+              <div className="stack">
+                <p>{chatResult.answer}</p>
+                {chatResult.sources.length > 0 ? (
+                  <div>
+                    <span className="meta">Sources: {chatResult.sources.join(", ")}</span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </section>
       )}

@@ -113,6 +113,35 @@ export async function uploadDocument(
   });
 }
 
+export type AskResponse = {
+  answer: string;
+  sources: string[];
+};
+
+export async function reindexDocument(
+  apiBaseUrl: string,
+  getAccessToken: AccessTokenGetter,
+  documentId: string
+): Promise<DocumentRecord> {
+  return apiRequest<DocumentRecord>(
+    apiBaseUrl,
+    `/documents/${documentId}/reindex`,
+    getAccessToken,
+    { method: "POST" }
+  );
+}
+
+export async function askQuestion(
+  apiBaseUrl: string,
+  getAccessToken: AccessTokenGetter,
+  question: string
+): Promise<AskResponse> {
+  return apiRequest<AskResponse>(apiBaseUrl, "/chat/ask", getAccessToken, {
+    body: JSON.stringify({ question }),
+    method: "POST"
+  });
+}
+
 async function apiRequest<T>(
   apiBaseUrl: string,
   path: string,

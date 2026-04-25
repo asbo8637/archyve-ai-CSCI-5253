@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
@@ -11,6 +13,7 @@ from api_app.features.documents.schemas import DocumentRead
 from api_app.features.documents.service import (
     create_document_from_upload,
     list_documents_for_company,
+    reindex_document,
 )
 from api_app.features.auth.service import get_current_principal
 from api_app.integrations.auth import AuthenticatedPrincipal
@@ -48,3 +51,19 @@ async def upload_document(
         uploaded_by_user_id=principal.user_id,
         file=file,
     )
+
+
+@router.post("/documents/{document_id}/reindex", response_model=DocumentRead)
+def reindex(
+    document_id: UUID,
+    session: Session = Depends(get_session),
+    principal: AuthenticatedPrincipal = Depends(get_current_principal),
+) -> Document:
+    document = reindex_document(
+        session,
+        document_id=document_id,
+        company_id=principal.company_id,
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail="Document not found.")
+    return document

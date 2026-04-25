@@ -20,6 +20,7 @@ from archyve_common.models import (
 )
 from archyve_common.settings import get_settings
 
+from worker_app.integrations.embeddings import get_embeddings_client
 from worker_app.integrations.storage import get_document_storage_resolver
 
 logging.basicConfig(
@@ -72,6 +73,17 @@ def claim_next_job() -> UUID | None:
         return job.id
 
 
+def _embed_chunks(chunk_objects: list[DocumentChunk]) -> None:
+    try:
+        client = get_embeddings_client()
+        embeddings = client.embed_texts([c.content for c in chunk_objects])
+        for chunk_obj, embedding in zip(chunk_objects, embeddings):
+            chunk_obj.embedding = embedding
+        logger.info("Generated embeddings for %d chunks", len(chunk_objects))
+    except Exception as exc:
+        logger.warning("Embedding generation skipped: %s", exc)
+
+
 def process_job(job_id: UUID) -> None:
     with SessionLocal.begin() as session:
         job = session.get(Job, job_id)
@@ -101,17 +113,20 @@ def process_job(job_id: UUID) -> None:
                 )
             )
 
+            chunk_objects = []
             for index, chunk in enumerate(chunks):
-                session.add(
-                    DocumentChunk(
-                        document_id=document.id,
-                        company_id=document.company_id,
-                        chunk_index=index,
-                        content=chunk,
-                        token_count=estimate_token_count(chunk),
-                        chunk_metadata={"source_path": document.storage_path},
-                    )
+                dc = DocumentChunk(
+                    document_id=document.id,
+                    company_id=document.company_id,
+                    chunk_index=index,
+                    content=chunk,
+                    token_count=estimate_token_count(chunk),
+                    chunk_metadata={"source_path": document.storage_path},
                 )
+                session.add(dc)
+                chunk_objects.append(dc)
+
+            _embed_chunks(chunk_objects)
 
             document.status = DocumentStatus.READY
             document.failure_reason = None

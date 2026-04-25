@@ -68,6 +68,7 @@ class Settings(BaseSettings):
     )
     worker_batch_size: int = Field(default=2, validation_alias="WORKER_BATCH_SIZE")
     worker_name: str = Field(default="local-worker", validation_alias="WORKER_NAME")
+    gemini_api_key: str | None = Field(default=None, validation_alias="GEMINI_API_KEY")
 
     @field_validator("cors_allowed_origins", mode="before")
     @classmethod
@@ -142,6 +143,10 @@ class Settings(BaseSettings):
             return None
 
         return f"{self.resolved_auth0_issuer}.well-known/jwks.json"
+
+    @property
+    def gemini_configured(self) -> bool:
+        return self.gemini_api_key is not None
 
     @property
     def auth0_configured(self) -> bool:
