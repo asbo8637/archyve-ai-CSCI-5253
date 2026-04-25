@@ -1,6 +1,7 @@
 alembic==1.16.5
 boto3==1.40.31
 fastapi==0.116.1
+google-generativeai==0.8.5
 pgvector==0.4.1
 psycopg[binary]==3.2.10
 PyJWT[crypto]==2.10.1

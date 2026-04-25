@@ -22,6 +22,32 @@ def list_documents_for_company(session: Session, *, company_id: UUID) -> list[Do
     return list(session.scalars(statement).all())
 
 
+def reindex_document(
+    session: Session,
+    *,
+    document_id: UUID,
+    company_id: UUID,
+) -> Document | None:
+    document = session.scalar(
+        select(Document)
+        .where(Document.id == document_id)
+        .where(Document.company_id == company_id)
+    )
+    if document is None:
+        return None
+
+    document.status = DocumentStatus.UPLOADED
+    document.failure_reason = None
+
+    job, message = build_process_document_job(company_id=company_id, document=document)
+    session.add(job)
+    session.commit()
+    session.refresh(document)
+
+    get_document_indexing_dispatcher().dispatch(message)
+    return document
+
+
 async def create_document_from_upload(
     session: Session,
     *,
