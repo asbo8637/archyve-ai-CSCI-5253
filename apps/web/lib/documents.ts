@@ -19,6 +19,9 @@ export type DocumentStatus =
 export type DocumentRecord = {
   id: string;
   filename: string;
+  allowed_roles: string[];
+  location_label: string | null;
+  training_enabled: boolean;
   status: DocumentStatus;
   failure_reason: string | null;
   created_at: string;

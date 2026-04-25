@@ -13,17 +13,20 @@ import {
 
 import {
   ApiError,
-  askQuestion,
   createCompany,
+  getCompanyMemberships,
   getAuthSession,
   getDocuments,
-  reindexDocument,
   selectCompany,
+  upsertCompanyMembership,
   uploadDocument,
   type AccessTokenGetter,
-  type AskResponse,
-  type AuthSession
+  type AuthSession,
+  type CompanyMembership,
+  type CompanyRole
 } from "@/lib/api";
+import { CompanyChat } from "@/components/company-chat";
+import { TrainingPanel } from "@/components/training-panel";
 import {
   getDocumentStatusLabel,
   type DocumentRecord,
@@ -34,6 +37,15 @@ type DashboardProps = {
   apiBaseUrl: string;
   authConfigured: boolean;
 };
+
+const COMPANY_ROLE_OPTIONS: Array<{ value: CompanyRole; label: string }> = [
+  { value: "admin", label: "Admin" },
+  { value: "manager", label: "Manager" },
+  { value: "employee", label: "Employee" },
+  { value: "trainee", label: "Trainee" }
+];
+
+const FALLBACK_DOCUMENT_ROLES: CompanyRole[] = ["admin"];
 
 export function DocumentDashboard({
   apiBaseUrl,
@@ -64,6 +76,7 @@ function AuthenticatedDocumentDashboard({
 }) {
   const {
     error: authError,
+    getIdTokenClaims,
     getAccessTokenSilently,
     isAuthenticated,
     isLoading,
@@ -74,35 +87,44 @@ function AuthenticatedDocumentDashboard({
 
   const [companyName, setCompanyName] = useState("");
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
+  const [companyMemberships, setCompanyMemberships] = useState<CompanyMembership[]>([]);
+  const [documentAllowedRoles, setDocumentAllowedRoles] =
+    useState<CompanyRole[]>(FALLBACK_DOCUMENT_ROLES);
+  const [documentTrainingEnabled, setDocumentTrainingEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [memberEmail, setMemberEmail] = useState("");
+  const [memberRole, setMemberRole] = useState<CompanyRole>("employee");
   const [message, setMessage] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [session, setSession] = useState<AuthSession | null>(null);
   const [sessionLoading, setSessionLoading] = useState(false);
   const [submitState, setSubmitState] = useState<
-    "idle" | "creating-company" | "switching-company" | "uploading"
+    "idle" | "creating-company" | "switching-company" | "uploading" | "saving-member"
   >("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const [chatQuestion, setChatQuestion] = useState("");
-  const [chatResult, setChatResult] = useState<AskResponse | null>(null);
-  const [chatError, setChatError] = useState<string | null>(null);
-  const [chatLoading, setChatLoading] = useState(false);
-
-  const [reindexingId, setReindexingId] = useState<string | null>(null);
+  const canManageMemberships = Boolean(session?.permissions.includes("memberships:manage"));
+  const canUploadDocuments = Boolean(session?.permissions.includes("documents:write"));
 
   useEffect(() => {
     if (!isAuthenticated) {
       setCompanyName("");
+      setCompanyMemberships([]);
       setDocuments([]);
+      setDocumentAllowedRoles(FALLBACK_DOCUMENT_ROLES);
+      setDocumentTrainingEnabled(false);
       setError(null);
+      setMemberEmail("");
+      setMemberRole("employee");
       setMessage(null);
       setSelectedFile(null);
       setSession(null);
       return;
     }
 
-    const accessTokenGetter = createAccessTokenGetter(getAccessTokenSilently);
+    const accessTokenGetter = createAccessTokenGetter(
+      getAccessTokenSilently,
+      getIdTokenClaims
+    );
     void loadWorkspace(
       apiBaseUrl,
       accessTokenGetter,
@@ -111,26 +133,72 @@ function AuthenticatedDocumentDashboard({
       setSessionLoading,
       setSession
     );
-  }, [apiBaseUrl, getAccessTokenSilently, isAuthenticated]);
+  }, [apiBaseUrl, getAccessTokenSilently, getIdTokenClaims, isAuthenticated]);
+
+  useEffect(() => {
+    setDocumentAllowedRoles(
+      defaultDocumentRolesForRole(session?.active_company?.role ?? null)
+    );
+    setDocumentTrainingEnabled(false);
+  }, [session?.active_company?.id, session?.active_company?.role]);
 
   useEffect(() => {
     if (!isAuthenticated || !session?.active_company) {
       return;
     }
 
-    const accessTokenGetter = createAccessTokenGetter(getAccessTokenSilently);
+    const accessTokenGetter = createAccessTokenGetter(
+      getAccessTokenSilently,
+      getIdTokenClaims
+    );
     const interval = window.setInterval(() => {
       void refreshDocuments(apiBaseUrl, accessTokenGetter, setDocuments);
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [apiBaseUrl, getAccessTokenSilently, isAuthenticated, session?.active_company?.id]);
+  }, [
+    apiBaseUrl,
+    getAccessTokenSilently,
+    getIdTokenClaims,
+    isAuthenticated,
+    session?.active_company?.id
+  ]);
+
+  useEffect(() => {
+    if (!isAuthenticated || !session?.active_company || !canManageMemberships) {
+      setCompanyMemberships([]);
+      return;
+    }
+
+    const accessTokenGetter = createAccessTokenGetter(
+      getAccessTokenSilently,
+      getIdTokenClaims
+    );
+    void refreshCompanyMemberships(
+      apiBaseUrl,
+      accessTokenGetter,
+      setCompanyMemberships,
+      setError
+    );
+  }, [
+    apiBaseUrl,
+    canManageMemberships,
+    getAccessTokenSilently,
+    getIdTokenClaims,
+    isAuthenticated,
+    session?.active_company?.id
+  ]);
 
   async function handleUpload(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     if (!selectedFile) {
       setError("Pick a file before uploading.");
+      return;
+    }
+
+    if (!canUploadDocuments) {
+      setError("Your role cannot upload company documents.");
       return;
     }
 
@@ -141,11 +209,19 @@ function AuthenticatedDocumentDashboard({
     try {
       const created = await uploadDocument(
         apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
-        selectedFile
+        createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims),
+        selectedFile,
+        {
+          allowedRoles: documentAllowedRoles,
+          trainingEnabled: documentTrainingEnabled
+        }
       );
       setDocuments((current) => [created, ...current]);
       setSelectedFile(null);
+      setDocumentAllowedRoles(
+        defaultDocumentRolesForRole(session?.active_company?.role ?? null)
+      );
+      setDocumentTrainingEnabled(false);
       setMessage(`${created.filename} was uploaded and queued for processing.`);
 
       if (fileInputRef.current) {
@@ -167,13 +243,13 @@ function AuthenticatedDocumentDashboard({
     try {
       const nextSession = await createCompany(
         apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
+        createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims),
         companyName
       );
       setCompanyName("");
       await applySession(
         apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
+        createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims),
         nextSession,
         setDocuments,
         setSession
@@ -186,45 +262,38 @@ function AuthenticatedDocumentDashboard({
     }
   }
 
-  async function handleReindex(documentId: string) {
-    setReindexingId(documentId);
+  async function handleMemberSave(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!canManageMemberships) {
+      setError("Your role cannot manage company memberships.");
+      return;
+    }
+
+    setSubmitState("saving-member");
+    setMessage(null);
     setError(null);
 
     try {
-      const updated = await reindexDocument(
+      const saved = await upsertCompanyMembership(
         apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
-        documentId
+        createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims),
+        {
+          email: memberEmail,
+          role: memberRole
+        }
       );
-      setDocuments((current: DocumentRecord[]) =>
-        current.map((doc: DocumentRecord) => (doc.id === updated.id ? updated : doc))
-      );
-    } catch (reindexError) {
-      setError(toDisplayMessage(reindexError, "Reindex failed."));
+      setCompanyMemberships((current) => [
+        saved,
+        ...current.filter((membership) => membership.id !== saved.id)
+      ]);
+      setMemberEmail("");
+      setMemberRole("employee");
+      setMessage(`Saved ${saved.email ?? "member"} as ${saved.role}.`);
+    } catch (membershipError) {
+      setError(toDisplayMessage(membershipError, "Unable to save membership."));
     } finally {
-      setReindexingId(null);
-    }
-  }
-
-  async function handleChat(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!chatQuestion.trim()) return;
-
-    setChatLoading(true);
-    setChatResult(null);
-    setChatError(null);
-
-    try {
-      const result = await askQuestion(
-        apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
-        chatQuestion
-      );
-      setChatResult(result);
-    } catch (chatErr) {
-      setChatError(toDisplayMessage(chatErr, "Chat request failed."));
-    } finally {
-      setChatLoading(false);
+      setSubmitState("idle");
     }
   }
 
@@ -241,12 +310,12 @@ function AuthenticatedDocumentDashboard({
     try {
       const nextSession = await selectCompany(
         apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
+        createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims),
         nextCompanyId
       );
       await applySession(
         apiBaseUrl,
-        createAccessTokenGetter(getAccessTokenSilently),
+        createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims),
         nextSession,
         setDocuments,
         setSession
@@ -256,6 +325,29 @@ function AuthenticatedDocumentDashboard({
     } finally {
       setSubmitState("idle");
     }
+  }
+
+  function handleRetryWorkspace() {
+    const accessTokenGetter = createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims);
+    void loadWorkspace(
+      apiBaseUrl,
+      accessTokenGetter,
+      setDocuments,
+      setError,
+      setSessionLoading,
+      setSession
+    );
+  }
+
+  function toggleDocumentRole(role: CompanyRole, checked: boolean) {
+    setDocumentAllowedRoles((current) => {
+      if (checked) {
+        return Array.from(new Set([...current, role]));
+      }
+
+      const nextRoles = current.filter((candidate) => candidate !== role);
+      return nextRoles.length ? nextRoles : ["admin"];
+    });
   }
 
   return (
@@ -284,9 +376,6 @@ function AuthenticatedDocumentDashboard({
           ) : null}
         </div>
         <p>
-          The browser authenticates with Auth0, the API verifies every bearer
-          token, and Postgres decides which company the request is allowed to
-          act inside.
         </p>
         <div className="hero-actions">
           <span className="meta">
@@ -338,6 +427,22 @@ function AuthenticatedDocumentDashboard({
         <section className="panel notice">
           <h2>Loading Workspace</h2>
           <p className="meta">Validating the session and resolving company access.</p>
+        </section>
+      ) : !session ? (
+        <section className="panel notice">
+          <h2>Unable to Load Workspace</h2>
+          <p className="meta">
+            The app could not reach the API session endpoint. Company setup will
+            appear after the session loads.
+          </p>
+          {error ? (
+            <p className="meta error" role="alert">
+              {error}
+            </p>
+          ) : null}
+          <button className="button" onClick={handleRetryWorkspace} type="button">
+            Retry
+          </button>
         </section>
       ) : session?.needs_company_setup ? (
         <section className="panel stack">
@@ -403,21 +508,49 @@ function AuthenticatedDocumentDashboard({
               </div>
             ) : (
               <>
-                <form className="uploader" onSubmit={handleUpload}>
-                  <input
-                    id="file"
-                    ref={fileInputRef}
-                    type="file"
-                    accept={SUPPORTED_DOCUMENT_ACCEPT}
-                    onChange={(event) => {
-                      setSelectedFile(event.target.files?.[0] ?? null);
-                      setError(null);
-                    }}
-                  />
-                  <button className="button" disabled={submitState === "uploading"}>
-                    {submitState === "uploading" ? "Uploading..." : "Upload Document"}
-                  </button>
-                </form>
+                {canUploadDocuments ? (
+                  <form className="uploader" onSubmit={handleUpload}>
+                    <input
+                      id="file"
+                      ref={fileInputRef}
+                      type="file"
+                      accept={SUPPORTED_DOCUMENT_ACCEPT}
+                      onChange={(event) => {
+                        setSelectedFile(event.target.files?.[0] ?? null);
+                        setError(null);
+                      }}
+                    />
+                    <div className="role-picker" aria-label="Document visibility">
+                      {COMPANY_ROLE_OPTIONS.map((role) => (
+                        <label key={role.value}>
+                          <input
+                            checked={documentAllowedRoles.includes(role.value)}
+                            onChange={(event) =>
+                              toggleDocumentRole(role.value, event.target.checked)
+                            }
+                            type="checkbox"
+                          />
+                          <span>{role.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    <label className="training-toggle">
+                      <input
+                        checked={documentTrainingEnabled}
+                        onChange={(event) =>
+                          setDocumentTrainingEnabled(event.target.checked)
+                        }
+                        type="checkbox"
+                      />
+                      <span>Use for training scenarios</span>
+                    </label>
+                    <button className="button" disabled={submitState === "uploading"}>
+                      {submitState === "uploading" ? "Uploading..." : "Upload Document"}
+                    </button>
+                  </form>
+                ) : (
+                  <p className="meta">Your role can ask questions but cannot upload documents.</p>
+                )}
                 {message ? <div className="callout">{message}</div> : null}
               </>
             )}
@@ -427,91 +560,119 @@ function AuthenticatedDocumentDashboard({
                 {error}
               </p>
             ) : null}
+
+            {canManageMemberships ? (
+              <div className="membership-panel">
+                <div>
+                  <h3>Members</h3>
+                  <p className="meta">
+                    Add existing or future users by email and assign their company role.
+                  </p>
+                </div>
+                <form className="uploader" onSubmit={handleMemberSave}>
+                  <input
+                    onChange={(event) => setMemberEmail(event.target.value)}
+                    placeholder="email@example.com"
+                    type="email"
+                    value={memberEmail}
+                  />
+                  <select
+                    className="company-select"
+                    onChange={(event) => setMemberRole(event.target.value as CompanyRole)}
+                    value={memberRole}
+                  >
+                    {COMPANY_ROLE_OPTIONS.map((role) => (
+                      <option key={role.value} value={role.value}>
+                        {role.label}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="button" disabled={submitState === "saving-member"}>
+                    {submitState === "saving-member" ? "Saving..." : "Save Member"}
+                  </button>
+                </form>
+                <div className="membership-list">
+                  {companyMemberships.map((membership) => (
+                    <div className="membership-row" key={membership.id}>
+                      <div>
+                        <span className="doc-name">
+                          {membership.email ?? "Member"}
+                        </span>
+                      </div>
+                      <span className="badge">{membership.role}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
           </div>
 
-          <div className="panel">
-            <div className="doc-row">
-              <div>
-                <h3>Documents</h3>
-                <p className="meta">
-                  The API lists and uploads documents only inside the active company.
-                </p>
-              </div>
-              <span className="meta">{documents.length} total</span>
-            </div>
+          <div className="stack">
+            <TrainingPanel
+              apiBaseUrl={apiBaseUrl}
+              canViewResults={
+                session?.active_company?.role === "admin" ||
+                session?.active_company?.role === "manager"
+              }
+              disabled={
+                Boolean(session?.company_selection_required) ||
+                !session?.active_company
+              }
+              getAccessToken={createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims)}
+            />
 
-            <div className="doc-list">
-              {documents.length === 0 ? (
-                <div className="doc-card">
-                  <span className="doc-name">No documents for this company yet</span>
-                  <span className="meta">
-                    Start with a `.txt`, `.pdf`, `.docx`, `.csv`, or `.json` file.
-                  </span>
+            <CompanyChat
+              apiBaseUrl={apiBaseUrl}
+              disabled={
+                Boolean(session?.company_selection_required) ||
+                !session?.active_company
+              }
+              getAccessToken={createAccessTokenGetter(getAccessTokenSilently, getIdTokenClaims)}
+            />
+
+            <div className="panel">
+              <div className="doc-row">
+                <div>
+                  <h3>Documents</h3>
+                  <p className="meta">
+                    The API lists and uploads documents only inside the active company.
+                  </p>
                 </div>
-              ) : (
-                documents.map((document) => (
-                  <div className="doc-card" key={document.id}>
-                    <div className="doc-row">
-                      <span className="doc-name">{document.filename}</span>
+                <span className="meta">{documents.length} total</span>
+              </div>
+
+              <div className="doc-list">
+                {documents.length === 0 ? (
+                  <div className="doc-card">
+                    <span className="doc-name">No documents for this company yet</span>
+                    <span className="meta">
+                      Start with a `.txt`, `.pdf`, `.docx`, `.csv`, or `.json` file.
+                    </span>
+                  </div>
+                ) : (
+                  documents.map((document) => (
+                    <div className="doc-card" key={document.id}>
                       <div className="doc-row">
+                        <span className="doc-name">{document.filename}</span>
                         <span className={`badge badge-${document.status}`}>
                           {getDocumentStatusLabel(document.status)}
                         </span>
-                        <button
-                          className="button button-secondary"
-                          disabled={reindexingId === document.id}
-                          onClick={() => void handleReindex(document.id)}
-                          type="button"
-                        >
-                          {reindexingId === document.id ? "Queuing..." : "Reindex"}
-                        </button>
                       </div>
+                      <span className="meta">
+                        Updated {new Date(document.updated_at).toLocaleString()}
+                      </span>
+                      <span className="meta">
+                        Roles: {document.allowed_roles.join(", ")}
+                        {document.training_enabled ? " · Training enabled" : ""}
+                      </span>
+                      {document.failure_reason ? (
+                        <span className="meta error">{document.failure_reason}</span>
+                      ) : null}
                     </div>
-                    <span className="meta">
-                      Updated {new Date(document.updated_at).toLocaleString()}
-                    </span>
-                    {document.failure_reason ? (
-                      <span className="meta error">{document.failure_reason}</span>
-                    ) : null}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="panel stack">
-            <div>
-              <h3>Ask a Question</h3>
-              <p className="meta">
-                Search across your indexed documents using Gemini.
-              </p>
-            </div>
-            <form className="uploader" onSubmit={handleChat}>
-              <input
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setChatQuestion(event.target.value)}
-                placeholder="Ask something about your documents..."
-                type="text"
-                value={chatQuestion}
-              />
-              <button className="button" disabled={chatLoading}>
-                {chatLoading ? "Asking..." : "Ask"}
-              </button>
-            </form>
-            {chatError ? (
-              <p className="meta error" role="alert">
-                {chatError}
-              </p>
-            ) : null}
-            {chatResult ? (
-              <div className="stack">
-                <p>{chatResult.answer}</p>
-                {chatResult.sources.length > 0 ? (
-                  <div>
-                    <span className="meta">Sources: {chatResult.sources.join(", ")}</span>
-                  </div>
-                ) : null}
+                  ))
+                )}
               </div>
-            ) : null}
+            </div>
           </div>
         </section>
       )}
@@ -520,14 +681,36 @@ function AuthenticatedDocumentDashboard({
 }
 
 function createAccessTokenGetter(
-  getAccessTokenSilently: ReturnType<typeof useAuth0>["getAccessTokenSilently"]
+  getAccessTokenSilently: ReturnType<typeof useAuth0>["getAccessTokenSilently"],
+  getIdTokenClaims: ReturnType<typeof useAuth0>["getIdTokenClaims"]
 ): AccessTokenGetter {
-  return async () =>
-    getAccessTokenSilently({
-      authorizationParams: {
-        scope: "openid profile email offline_access"
-      }
-    });
+  return async () => {
+    const [accessToken, idTokenClaims] = await Promise.all([
+      getAccessTokenSilently({
+        authorizationParams: {
+          scope: "openid profile email offline_access"
+        }
+      }),
+      getIdTokenClaims()
+    ]);
+
+    return {
+      accessToken,
+      idToken: idTokenClaims?.__raw
+    };
+  };
+}
+
+function defaultDocumentRolesForRole(role: string | null): CompanyRole[] {
+  if (isCompanyRole(role)) {
+    return [role];
+  }
+
+  return FALLBACK_DOCUMENT_ROLES;
+}
+
+function isCompanyRole(role: string | null): role is CompanyRole {
+  return COMPANY_ROLE_OPTIONS.some((option) => option.value === role);
 }
 
 async function loadWorkspace(
@@ -586,6 +769,20 @@ async function refreshDocuments(
     ) {
       return;
     }
+  }
+}
+
+async function refreshCompanyMemberships(
+  apiBaseUrl: string,
+  getAccessToken: AccessTokenGetter,
+  setCompanyMemberships: Dispatch<SetStateAction<CompanyMembership[]>>,
+  setError: Dispatch<SetStateAction<string | null>>
+) {
+  try {
+    const memberships = await getCompanyMemberships(apiBaseUrl, getAccessToken);
+    setCompanyMemberships(memberships);
+  } catch (membershipError) {
+    setError(toDisplayMessage(membershipError, "Unable to load company members."));
   }
 }
 
